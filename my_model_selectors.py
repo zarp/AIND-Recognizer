@@ -71,13 +71,31 @@ class SelectorBIC(ModelSelector):
     def select(self):
         """ select the best model for self.this_word based on
         BIC score for n between self.min_n_components and self.max_n_components
-
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        best_bic_score = float("inf") # +inf because smaller bic score is better
+        best_model = None
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        for number_of_states in range(self.min_n_components, self.max_n_components+1): #2..15 per notebook
+            try:
+                
+                model = self.base_model(number_of_states)
+                score = model.score(self.X, self.lengths)
+                
+                ## formula provided by Dana S. for the number of free parameters:
+                ## number of free parameters = n_components*n_components + 2*n_components*n_features - 1
+                number_of_features = len(self.X[0])
+                number_of_free_parameters = number_of_states**2 + 2*number_of_states*number_of_features  - 1
+                
+                bic_score = -2*score + number_of_free_parameters*math.log(sum(self.lengths)) #sum(self.lengths) = len(self.X)) = length/size of the observation time series
+                if bic_score < best_bic_score: #smaller is better
+                    best_bic_score = bic_score
+                    best_model = model
+            except:
+                pass
+
+        return best_model
 
 
 class SelectorDIC(ModelSelector):
@@ -91,10 +109,29 @@ class SelectorDIC(ModelSelector):
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        best_dic_score = float("-inf")
+        best_model = None
+        
+        for number_of_states in range(self.min_n_components, self.max_n_components+1): #2..15 per notebook
+            try:
+                model = self.base_model(number_of_states)
+                score = model.score(self.X, self.lengths) #log(P(X(i)) in the formula above
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+                score_without_i = 0
+                M = len(self.hwords)
+                for word in self.hwords:
+                    wordX, wordlength = self.hwords[word]
+                    score_without_i += model.score(wordX, wordlength)
 
+                dic_score = score - score_without_i/(M-1)
+
+                if dic_score > best_dic_score: 
+                    best_dic_score = dic_score
+                    best_model = model
+            except:
+                pass
+
+        return best_model
 
 class SelectorCV(ModelSelector):
     ''' select best model based on average log Likelihood of cross-validation folds
@@ -103,6 +140,28 @@ class SelectorCV(ModelSelector):
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        best_score = float("-inf")
+        number_of_splits = min(3, len(self.sequences)) # kfold default = 3 but some words in the dataset have less than 3 examples
+        best_model = None
+        
+        #need to treat n_splits = 1 as a separate case
+        #otherwise - will get a ValueError: "k-fold cross-validation requires at least one train/test split by setting n_splits=2 or more"
+        if number_of_splits > 1:   
+            k_fold = KFold(n_splits = number_of_splits) 
+            
+            for number_of_states in range(self.min_n_components, self.max_n_components+1): #2..15 per notebook
+                try:
+                    for train_indices, test_indices in k_fold.split(self.sequences):
+                        self.X, self.lengths = combine_sequences(train_indices, self.sequences)
+                        test_x, test_length = combine_sequences(test_indices, self.sequences)
+                        model = self.base_model(number_of_states)
+                        score = model.score(test_x, test_length)
+                        if score > best_score: 
+                            best_score = score
+                            best_model = model
+                except:
+                    pass
+        else:
+            pass
+        
+        return best_model
